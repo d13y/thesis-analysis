@@ -1,0 +1,307 @@
+---
+title: "analysis-robustness"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, 
+                      results = 'asis', cache = TRUE)
+#PACKAGES & FUNCTIONS
+library(tidyverse)
+library(stargazer)
+library(sandwich)
+library(effectsize)
+library(aod)
+library(tableone)
+library(WeightIt)
+library(pgirmess)
+library(hdm)
+library(lmtest)
+source("functions.R")
+
+#SETUP
+set.seed(21200029)
+local_path <- "C:\\Users\\danie\\Documents\\Masters\\3. THESIS\\Analysis"
+surveyImport <- read.csv(paste0(local_path,"\\results.csv"), header = TRUE)
+survey <- surveyImport %>% filter(SUBMIT==1)
+
+#SURVEY 'SPLIT' (required for quick-realigning of models)
+surveyStatutory <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_STATUTORY)
+surveyProperty <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_PROPERTY)
+surveyPersons <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_PERSONS)
+surveyControl <- survey %>% filter(RANDOMISER==0)
+surveyTreatment <- survey %>% filter(RANDOMISER==1)
+surveyAttrition <- surveyImport %>% filter(!is.na(ATTRITION))
+surveyControlAttrition <- surveyAttrition %>% filter(RANDOMISER==0)
+surveyTreatmentAttrition <- surveyAttrition %>% filter(RANDOMISER==1)
+```
+
+```{r model-specification, include=FALSE}
+independent <- c("RANDOMISER","likert_SEVERITY",
+                  "AGE", "MEDIA_SUM",
+                  "d_GENDER", "d_RACE", "d_EDUCATION", 
+                  "d_PUNISHMENT", "CRIME_FEAR"
+                 )
+#OLS
+formulaStatutory <- as.formula(paste("CERTAINTY_STATUTORY~", 
+                                    paste(independent, collapse = "+")))
+formulaProperty <- as.formula(paste("CERTAINTY_PROPERTY~", 
+                                    paste(independent, collapse = "+")))
+formulaPersons <- as.formula(paste("CERTAINTY_PERSONS~", 
+                                    paste(independent, collapse = "+")))
+#Logit
+formulaStatutoryLogit <- as.formula(paste("logit_CERTAINTY_STATUTORY~", 
+                                    paste(independent, collapse = "+")))
+formulaPropertyLogit <- as.formula(paste("logit_CERTAINTY_PROPERTY~", 
+                                    paste(independent, collapse = "+")))
+formulaPersonsLogit <- as.formula(paste("logit_CERTAINTY_PERSONS~", 
+                                    paste(independent, collapse = "+")))
+```
+
+```{r model-ols, include=FALSE}
+#Model
+olsStatutory <- lm(data=surveyStatutory,
+                   formulaStatutory)
+olsProperty <- lm(data=surveyProperty,
+                   formulaProperty)
+olsPersons <- lm(data=surveyPersons,
+                   formulaPersons)
+
+#Cohen's D
+olsStatutoryD <- cohens_d(surveyControl$CERTAINTY_STATUTORY,
+                       surveyTreatment$CERTAINTY_STATUTORY)
+olsPropertyD <- cohens_d(surveyControl$CERTAINTY_PROPERTY,
+                      surveyTreatment$CERTAINTY_PROPERTY)
+olsPersonsD <- cohens_d(surveyControl$CERTAINTY_PERSONS,
+                      surveyTreatment$CERTAINTY_PERSONS)
+
+#Odds Ratio
+olsStatutoryOR <- d_to_oddsratio(olsStatutoryD$Cohens_d)
+olsPropertyOR <- d_to_oddsratio(olsPropertyD$Cohens_d)
+olsPersonsOR <- d_to_oddsratio(olsPersonsD$Cohens_d)
+
+#Restricted Model (excl. Background Questions)
+olsStatutoryWald <- waldTest(olsStatutory, vars=2:9)
+olsPropertyWald <- waldTest(olsProperty, vars=2:9)
+olsPersonsWald <- waldTest(olsPersons, vars=2:9)
+
+```
+
+```{r model-logit}
+#Fractional Logit model
+logitStatutory <- glm(data=surveyStatutory, formulaStatutoryLogit,
+                      family=binomial(link="logit"))
+logitProperty <- glm(data=surveyProperty, formulaPropertyLogit,
+                     family=binomial(link="logit"))
+logitPersons <- glm(data=surveyPersons, formulaPersonsLogit,
+                    family=binomial(link="logit"))
+
+#Odds Ratio
+logitStatutoryOR <- exp(logitStatutory$coefficients['RANDOMISER'])
+logitPropertyOR <- exp(logitProperty$coefficients['RANDOMISER'])
+logitPersonsOR <- exp(logitPersons$coefficients['RANDOMISER'])
+
+#Cohen's D
+logitStatutoryD <- logoddsratio_to_d(logitStatutoryOR)
+logitPropertyD <- logoddsratio_to_d(logitPropertyOR)
+logitPersonsD <- logoddsratio_to_d(logitPersonsOR)
+
+#Fractional Logit Model Output
+crimegazer(logitStatutory, logitProperty, logitPersons,
+           rm0(logitStatutoryD$Cohens_d),
+           rm0(logitPropertyD$Cohens_d), 
+           rm0(logitPersonsD$Cohens_d),
+           caption="Table HHH: Fractional Logit Regression Results Comparison, Key Covariates"
+           )
+```
+
+```{r attrition-model, include=FALSE, eval=FALSE}
+#Inverse Probability Weights
+weights_ipw <- weightit(data = surveyAttrition,
+                        ATTRITION ~ RANDOMISER + likert_SEVERITY_STATUTORY +
+                          likert_SEVERITY_PROPERTY + likert_SEVERITY_PERSONS +
+                          AGE + MEDIA_SUM + 
+                          d_GENDER + d_RACE + d_EDUCATION +
+                          d_PUNISHMENT + CRIME_FEAR,
+                        method = "ps",
+                        estimand = "ATE",
+                        stabilize = TRUE)
+
+surveyWeight <- surveyAttrition %>% mutate(ipw = weights_ipw$weights)
+surveyStatutoryWeight <- surveyWeight %>% rename(likert_SEVERITY=likert_SEVERITY_STATUTORY)
+surveyPropertyWeight <- surveyWeight %>% rename(likert_SEVERITY=likert_SEVERITY_PROPERTY)
+surveyPersonsWeight <- surveyWeight %>% rename(likert_SEVERITY=likert_SEVERITY_PERSONS)
+
+#Models
+olsStatutoryWeight <- lm(data = surveyStatutoryWeight,
+                         formula = formulaStatutory, weights = ipw)
+olsPropertyWeight <- lm(data = surveyPropertyWeight, 
+                        formula = formulaProperty, weights = ipw)
+olsPersonsWeight <- lm(data = surveyPersonsWeight, 
+                       formula = formulaPersons, weights = ipw)
+
+#Cohen's D
+statutoryDWeight <- cohens_d(surveyControlAttrition$CERTAINTY_STATUTORY,
+                            surveyTreatmentAttrition$CERTAINTY_STATUTORY)
+propertyDWeight <- cohens_d(surveyControlAttrition$CERTAINTY_PROPERTY,
+                            surveyTreatmentAttrition$CERTAINTY_PROPERTY)
+personsDWeight <- cohens_d(surveyControlAttrition$CERTAINTY_PERSONS,
+                            surveyTreatmentAttrition$CERTAINTY_PERSONS)
+
+#Restricted Model (excl. Background Questions)
+statutoryWaldWeight <- waldTest(olsStatutoryWeight, vars=2:9)
+propertyWaldWeight <- waldTest(olsPropertyWeight, vars=2:9)
+personsWaldWeight <- waldTest(olsPersonsWeight, vars=2:9)
+
+#Output
+crimegazer(olsStatutoryWeight, olsPropertyWeight, olsPersonsWeight,
+           rm0(statutoryDWeight$Cohens_d), rm0(propertyDWeight$Cohens_d), rm0(personsDWeight$Cohens_d),
+           statutoryWaldWeight, propertyWaldWeight, personsWaldWeight,
+           caption="Table FFF: OLS Regression Results, Inverse Probability Weights")
+```
+
+```{r permutations, include=FALSE, eval=FALSE}
+#WARNING: THIS TAKES ~20 MINUTES TO RUN!
+olsStatutoryPermutation <- PermTest(olsStatutory, B=100000)
+olsPropertyPermutation <- PermTest(olsProperty, B=100000)
+olsPersonsPermutation <- PermTest(olsPersons, B=100000)
+```
+
+```{r multiple-hypothesis, include=FALSE, eval=FALSE}
+olsStatutoryRomanaWolf <- p_adjust(olsStatutory, method="RW", B=100000)
+olsPropertyRomanoWolf <- p_adjust(olsProperty, method="RW", B=100000)
+olsPersonsRomanoWolf <- p_adjust(olsPersons, method="RW", B=100000)
+```
+
+```{r heterogenous-effects, include=FALSE, eval=FALSE}
+#Very messy/inefficient code!
+#MODELS
+  #Gender
+  olsStatutoryGender <- heterogenous_effects(surveyStatutory, formulaStatutory,
+                                            "RANDOMISER*d_GENDER")
+  olsPropertyGender <- heterogenous_effects(surveyProperty, formulaProperty,
+                                            "RANDOMISER*d_GENDER")
+  olsPersonsGender <- heterogenous_effects(surveyPersons, formulaPersons,
+                                            "RANDOMISER*d_GENDER")
+  #Race
+  olsStatutoryRace <- heterogenous_effects(surveyStatutory, formulaStatutory,
+                                          "RANDOMISER*d_RACE")
+  olsPropertyRace <- heterogenous_effects(surveyProperty, formulaProperty,
+                                          "RANDOMISER*d_RACE")
+  olsPersonsRace <- heterogenous_effects(surveyPersons, formulaPersons,
+                                          "RANDOMISER*d_RACE")
+  #Education
+  olsStatutoryEducation <- heterogenous_effects(surveyStatutory, formulaStatutory,
+                                                "RANDOMISER*d_EDUCATION")
+  olsPropertyEducation <- heterogenous_effects(surveyProperty, formulaProperty,
+                                               "RANDOMISER*d_EDUCATION")
+  olsPersonsEducation <- heterogenous_effects(surveyPersons, formulaPersons,
+                                              "RANDOMISER*d_EDUCATION")
+  #Punishment
+  olsStatutoryPunishment <- heterogenous_effects(surveyStatutory, formulaStatutory,
+                                                "RANDOMISER*d_PUNISHMENT")
+  olsPropertyPunishment <- heterogenous_effects(surveyProperty, formulaProperty,
+                                                "RANDOMISER*d_PUNISHMENT")
+  olsPersonsPunishment <- heterogenous_effects(surveyPersons, formulaPersons,
+                                                "RANDOMISER*d_PUNISHMENT")
+  #Fear of Crime
+  olsStatutoryFear <- heterogenous_effects(surveyStatutory, formulaStatutory,
+                                          "RANDOMISER*CRIME_FEAR")
+  olsPropertyFear <- heterogenous_effects(surveyProperty, formulaProperty,
+                                          "RANDOMISER*CRIME_FEAR")
+  olsPersonsFear <- heterogenous_effects(surveyPersons, formulaPersons,
+                                          "RANDOMISER*CRIME_FEAR")
+  #Age
+  olsStatutoryAge <- heterogenous_effects(surveyStatutory, formulaStatutory,
+                                          "RANDOMISER*AGE")
+  olsPropertyAge <- heterogenous_effects(surveyProperty, formulaProperty,
+                                          "RANDOMISER*AGE")
+  olsPersonsAge <- heterogenous_effects(surveyPersons, formulaPersons,
+                                          "RANDOMISER*AGE")
+  #Media Consumption
+  olsStatutoryMedia <- heterogenous_effects(surveyStatutory, formulaStatutory,
+                                          "RANDOMISER*MEDIA_SUM")
+  olsPropertyMedia <- heterogenous_effects(surveyProperty, formulaProperty,
+                                          "RANDOMISER*MEDIA_SUM")
+  olsPersonsMedia <- heterogenous_effects(surveyPersons, formulaPersons,
+                                          "RANDOMISER*MEDIA_SUM")
+  #Crime Severity
+  olsStatutorySeverity <- heterogenous_effects(surveyStatutory, formulaStatutory,
+                                          "RANDOMISER*likert_SEVERITY")
+  olsPropertySeverity <- heterogenous_effects(surveyProperty, formulaProperty,
+                                          "RANDOMISER*likert_SEVERITY")
+  olsPersonsSeverity <- heterogenous_effects(surveyPersons, formulaPersons,
+                                          "RANDOMISER*likert_SEVERITY")
+  #All
+  heterogenousVariables <- paste0("RANDOMISER*d_GENDER+RANDOMISER*d_RACE+",
+                                  "RANDOMISER*d_EDUCATION+",
+                                  "RANDOMISER*d_PUNISHMENT+RANDOMISER*CRIME_FEAR+",
+                                  "RANDOMISER*d_AGE+RANDOMISER*d_MEDIA_SUM+",
+                                  "RANDOMISER*likert_SEVERITY")
+  olsStatutoryAll <- heterogenous_effects(surveyStatutory, formulaStatutory,
+                                          heterogenousVariables)
+  olsPropertyAll <- heterogenous_effects(surveyProperty, formulaProperty,
+                                          heterogenousVariables)
+  olsPersonsAll <- heterogenous_effects(surveyPersons, formulaPersons,
+                                          heterogenousVariables)
+                         
+#OUTPUT
+stargazer(#olsStatutoryGender, 
+  #olsPropertyGender, 
+  olsPersonsGender,
+          type="html", title="HTE: Gender")
+stargazer(#olsStatutoryRace, 
+  #olsPropertyRace, 
+  olsPersonsRace,
+          type="html", title="HTE: Race")
+stargazer(#olsStatutoryEducation, 
+  #olsPropertyEducation, 
+  olsPersonsEducation,
+          type="html", title="HTE: Education")
+stargazer(#olsStatutoryPunishment, 
+  #olsPropertyPunishment, 
+  olsPersonsPunishment,
+          type="html", title="HTE: Punishment")
+stargazer(#olsStatutoryFear, 
+  #olsPropertyFear, 
+  olsPersonsFear,
+          type="html", title="HTE: Fear of Crime")
+stargazer(#olsStatutoryAge, 
+  #olsPropertyAge, 
+  olsPersonsAge,
+          type="html", title="HTE: Age")
+stargazer(#olsStatutoryMedia, 
+  #olsPropertyMedia, 
+  olsPersonsMedia,
+          type="html", title="HTE: Media Consumption")
+stargazer(#olsStatutorySeverity, 
+          #olsPropertySeverity, 
+          olsPersonsSeverity,
+          type="html", title="HTE: Crime Severity")
+stargazer(#olsStatutoryAll, 
+          #olsPropertyAll, 
+          olsPersonsAll,
+          type="html", title="HTE: All Covariates")
+
+```
+
+```{r model-selection, include=FALSE, eval=FALSE}
+#RESET Test
+olsStatutoryReset <- resettest(olsStatutory, type = "fitted")
+olsPropertyReset <- resettest(olsProperty, type = "fitted")
+olsPersonsReset <- resettest(olsPersons, type = "fitted")
+
+#Breusch-Pagan Test
+olsStatutoryBP <- bptest(olsStatutory)
+olsPropertyBP <- bptest(olsProperty)
+olsPersonsBP <- bptest(olsPersons)
+
+#Information Criteria
+statutoryAIC <- AIC(olsStatutory, logitStatutory)
+statutoryBIC <- BIC(olsStatutory, logitStatutory)
+propertyAIC <- AIC(olsProperty, logitProperty)
+propertyBIC <- BIC(olsProperty, logitProperty)
+personsAIC <- AIC(olsPersons, logitPersons)
+personsBIC <- BIC(olsPersons, logitPersons)
+```

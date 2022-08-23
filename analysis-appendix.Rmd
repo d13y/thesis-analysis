@@ -1,0 +1,198 @@
+---
+title: "r-appendix"
+output: html_document
+date: "2022-08-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, 
+                      results = 'asis', cache = TRUE)
+#PACKAGES & FUNCTIONS
+library(tidyverse)
+library(stargazer)
+library(sandwich)
+library(effectsize)
+library(aod)
+library(tableone)
+library(WeightIt)
+library(pgirmess)
+library(hdm)
+library(lmtest)
+source("functions.R")
+
+#SETUP
+set.seed(21200029)
+local_path <- "C:\\Users\\danie\\Documents\\Masters\\3. THESIS\\Analysis"
+surveyImport <- read.csv(paste0(local_path,"\\results.csv"), header = TRUE)
+survey <- surveyImport %>% filter(SUBMIT==1)
+
+#SURVEY 'SPLIT' (required for quick-realigning of models)
+surveyStatutory <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_STATUTORY)
+surveyProperty <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_PROPERTY)
+surveyPersons <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_PERSONS)
+surveyControl <- survey %>% filter(RANDOMISER==0)
+surveyTreatment <- survey %>% filter(RANDOMISER==1)
+surveyAttrition <- surveyImport %>% filter(!is.na(ATTRITION))
+surveyControlAttrition <- surveyAttrition %>% filter(RANDOMISER==0)
+surveyTreatmentAttrition <- surveyAttrition %>% filter(RANDOMISER==1)
+```
+
+```{r model-outliers, include=FALSE, eval=FALSE}
+#Remove Outliers
+surveyStatutoryOutlierRM <- surveyStatutory %>% filter(OUTLIER==0)
+surveyPropertyOutlierRM <- surveyProperty %>% filter(OUTLIER==0)
+surveyPersonsOutlierRM <- surveyPersons %>% filter(OUTLIER==0)
+surveyControlOutlierRM <- surveyControl %>% filter(OUTLIER==0)
+surveyTreatmentOutlierRM <- surveyTreatment %>% filter(OUTLIER==0)
+
+#Model Specification
+independent <- c("RANDOMISER","likert_SEVERITY",
+                  "AGE", "MEDIA_SUM",
+                  "d_GENDER", "d_RACE", "d_EDUCATION", 
+                  "d_PUNISHMENT", "CRIME_FEAR"
+                 )
+formulaStatutory <- as.formula(paste("CERTAINTY_STATUTORY~", 
+                                    paste(independent, collapse = "+")))
+formulaProperty <- as.formula(paste("CERTAINTY_PROPERTY~", 
+                                    paste(independent, collapse = "+")))
+formulaPersons <- as.formula(paste("CERTAINTY_PERSONS~", 
+                                    paste(independent, collapse = "+")))
+
+olsStatutory <- lm(data=surveyStatutoryOutlierRM,
+                   formulaStatutory)
+olsProperty <- lm(data=surveyPropertyOutlierRM,
+                   formulaProperty)
+olsPersons <- lm(data=surveyPersonsOutlierRM,
+                   formulaPersons)
+
+#Cohen's D
+statutoryD <- cohens_d(surveyControlOutlierRM$CERTAINTY_STATUTORY,
+                       surveyTreatmentOutlierRM$CERTAINTY_STATUTORY)
+propertyD <- cohens_d(surveyControlOutlierRM$CERTAINTY_PROPERTY,
+                      surveyTreatmentOutlierRM$CERTAINTY_PROPERTY)
+personsD <- cohens_d(surveyControlOutlierRM$CERTAINTY_PERSONS,
+                      surveyTreatmentOutlierRM$CERTAINTY_PERSONS)
+
+#Odds Ratio
+statutoryOR <- d_to_oddsratio(statutoryD$Cohens_d)
+propertyOR <- d_to_oddsratio(propertyD$Cohens_d)
+personsOR <- d_to_oddsratio(personsD$Cohens_d)
+
+#Restricted Model (excl. Background Questions)
+statutoryWald <- waldTest(olsStatutory, vars=2:9)
+propertyWald <- waldTest(olsProperty, vars=2:9)
+personsWald <- waldTest(olsPersons, vars=2:9)
+
+crimegazer(olsStatutory, olsProperty, olsPersons,
+           rm0(statutoryD$Cohens_d), rm0(propertyD$Cohens_d), rm0(personsD$Cohens_d),
+           statutoryWald, propertyWald, personsWald,
+           caption="Table NNN: OLS Regression Results, Outlier Analysis")
+```
+
+```{r model-specification, include=FALSE, eval=FALSE}
+#Regressors
+independent <- c("RANDOMISER","likert_SEVERITY",
+                  "AGE", "MEDIA_SUM",
+                  "d_GENDER", "d_RACE", "d_EDUCATION", 
+                  "d_PUNISHMENT", "CRIME_FEAR"
+                 )
+
+#Formula
+  #Statutory Crimes
+  formulaDT <- as.formula(paste("CERTAINTY_DRUGTRAFFIC~", 
+                                  paste(independent, collapse = "+")))
+  formulaDUI <- as.formula(paste("CERTAINTY_DUI~", 
+                                  paste(independent, collapse = "+")))
+  #Crimes Against Property
+  formulaArson <- as.formula(paste("CERTAINTY_ARSON~", 
+                                    paste(independent, collapse = "+")))
+  formulaBurglary <- as.formula(paste("CERTAINTY_BURGLARY~", 
+                                    paste(independent, collapse = "+")))
+  formulaFraud <- as.formula(paste("CERTAINTY_FRAUD~", 
+                                    paste(independent, collapse = "+")))
+  #Crimes Against Persons
+  formulaDV <- as.formula(paste("CERTAINTY_DOMESTIC~", 
+                                paste(independent, collapse = "+")))
+  formulaMurder <- as.formula(paste("CERTAINTY_MURDER~", 
+                                paste(independent, collapse = "+")))
+  formulaSA <- as.formula(paste("CERTAINTY_SEXUAL~", 
+                                paste(independent, collapse = "+")))
+```
+
+```{r ols-crimes, include=FALSE, eval=FALSE}
+#Models
+  #Statutory Crimes
+  olsDT <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_DRUGTRAFFIC) %>%
+              lm(data=., formulaDT)
+  olsDUI <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_DUI) %>%
+              lm(data=., formulaDUI)
+  #Crimes Against Property
+  olsArson <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_ARSON) %>%
+                lm(data=., formulaArson)
+  olsBurglary <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_BURGLARY) %>%
+                lm(data=., formulaBurglary)
+  olsFraud <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_FRAUD) %>%
+                lm(data=., formulaFraud)
+  #Crimes Against Persons
+  olsDV <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_DOMESTIC) %>%
+                lm(data=., formulaDV)
+  olsMurder <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_MURDER) %>%
+                lm(data=., formulaMurder)
+  olsSA <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_SEXUAL) %>%
+                lm(data=., formulaSA)
+
+#Output
+sologazer(olsDT, columnSearch="CERTAINTY_DRUGTRAFFIC")
+sologazer(olsDUI, columnSearch="CERTAINTY_DUI")
+sologazer(olsArson, columnSearch="CERTAINTY_ARSON")
+sologazer(olsBurglary, columnSearch="CERTAINTY_BURGLARY")
+sologazer(olsFraud, columnSearch="CERTAINTY_FRAUD")
+sologazer(olsDV, columnSearch="CERTAINTY_DOMESTIC")
+sologazer(olsMurder, columnSearch="CERTAINTY_MURDER")
+sologazer(olsSA, columnSearch="CERTAINTY_SEXUAL")
+```
+
+```{r attrition-descriptive, include=FALSE, eval=FALSE}
+#Equal Proportions
+attrition <- prop.test(x=c(nrow(surveyControl), nrow(surveyTreatment)),
+                       n=c(nrow(surveyControlAttrition),
+                           nrow(surveyTreatmentAttrition)))
+
+#Descriptive Statistics
+tableOneDemographicAttrition <- CreateTableOne(
+  vars=c( #Categorical variables
+          "GENDER", "RACE", "EDUCATION", 
+          "RELIGION", "POLITICS", "EMPLOYMENT", 
+          #Continuous variables
+          "AGE", "MEDIA_GENERAL", "MEDIA_CRIME", "MEDIA_SUM",
+          "HOUSEHOLD_SIZE",
+          "HOUSEHOLD_ANNUAL_INCOME_PPP_USD"),
+  strata=c("RANDOMISER", 
+           "ATTRITION"),
+  data=surveyAttrition,
+  includeNA = FALSE,
+  smd = TRUE,
+  test = TRUE,
+  addOverall = TRUE)
+
+#Criminal Justice System
+tableOneCJSAttrition <- CreateTableOne(
+  vars=c( #Categorical variables
+          "CRIME_FEAR", "CRIME_VICTIM", "CRIME_WITNESS",
+          "CRIME_CONVICT", "CRIME_JURY", "CRIME_WORK", 
+          #Continuous variables
+          "DETERRENCE_rank", "PROTECTION_rank", 
+          "PUNISHMENT_rank", "REHABILITATION_rank"
+          ),
+  strata=c("RANDOMISER",
+            "ATTRITION"),
+  data=surveyAttrition,
+  includeNA = FALSE,
+  smd = TRUE,
+  test = TRUE,
+  addOverall = TRUE)
+
+#Output
+kableone(tableOneDemographicAttrition)
+kableone(tableOneCJSAttrition)
+```

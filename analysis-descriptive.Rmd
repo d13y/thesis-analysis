@@ -1,0 +1,95 @@
+---
+title: "analysis-descriptive"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, 
+                      results = 'asis', cache = TRUE)
+library(tidyverse)
+library(knitr)
+library(tableone)
+
+#SETUP
+set.seed(21200029)
+local_path <- "C:\\Users\\danie\\Documents\\Masters\\3. THESIS\\Analysis"
+surveyImport <- read.csv(paste0(local_path,"\\results.csv"), header = TRUE)
+survey <- surveyImport %>% filter(SUBMIT==1)
+```
+
+```{r demographic}
+tableOneDemographic <- CreateTableOne(
+  vars=c(#Categorical variables
+         "GENDER", "RACE", "EDUCATION", 
+         "RELIGION", "POLITICS", "EMPLOYMENT",
+         #Continuous variables
+         "AGE", "MEDIA_GENERAL", "MEDIA_CRIME",
+         "HOUSEHOLD_SIZE",
+         "HOUSEHOLD_ANNUAL_INCOME_PPP_USD"
+         ),
+  strata=c("RANDOMISER"),
+  data=survey,
+  includeNA = FALSE,
+  smd = TRUE,
+  test = TRUE,
+  addOverall = TRUE)
+
+kableone(tableOneDemographic)
+
+```
+
+```{r cjs}
+tableOneExperience <- CreateCatTable(
+  vars=c(#Categorical variables
+         "CRIME_FEAR", "CRIME_VICTIM", "CRIME_WITNESS",
+         "CRIME_CONVICT", "CRIME_JURY", "CRIME_WORK"
+         ),
+  strata=c("RANDOMISER"),
+  data=survey,
+  includeNA = FALSE,
+  smd = TRUE,
+  test = TRUE,
+  addOverall = TRUE)
+
+#Criminal Justice System
+tableOnePurpose <- CreateContTable(
+  vars=c(#Continuous variables
+         "DETERRENCE_rank", "PROTECTION_rank", 
+         "PUNISHMENT_rank", "REHABILITATION_rank"
+         ),
+  strata=c("RANDOMISER"),
+  data=survey,
+  smd = TRUE,
+  test = TRUE,
+  addOverall = TRUE)
+
+kableone(tableOneExperience)
+kableone(tableOnePurpose)
+```
+
+```{r crime}
+surveyInflated <- survey %>% 
+  mutate(across(c(which(grepl("certainty",colnames(survey), 
+                              ignore.case = TRUE)==TRUE)),
+                ~ .*100))
+
+tableOneCrime <- CreateTableOne(
+  vars=c(#Certainty
+         "CERTAINTY_DRUGTRAFFIC", "CERTAINTY_DUI",
+         "CERTAINTY_ARSON", "CERTAINTY_BURGLARY", "CERTAINTY_FRAUD",
+         "CERTAINTY_DOMESTIC", "CERTAINTY_MURDER", "CERTAINTY_SEXUAL",
+         #Severity
+         "likert_SEVERITY_DRUGTRAFFIC", "likert_SEVERITY_DUI",
+         "likert_SEVERITY_ARSON", "likert_SEVERITY_BURGLARY", "likert_SEVERITY_FRAUD",
+         "likert_SEVERITY_DOMESTIC", "likert_SEVERITY_MURDER", "likert_SEVERITY_SEXUAL"
+          ),
+  strata=c("RANDOMISER"),
+  data=surveyInflated,
+  includeNA = FALSE,
+  smd = TRUE,
+  test = TRUE,
+  addOverall = TRUE)
+
+kableone(tableOneCrime)
+```

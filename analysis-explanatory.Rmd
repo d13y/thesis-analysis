@@ -1,0 +1,93 @@
+---
+title: "analysis-explanatory"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, 
+                      results = 'asis', cache = FALSE)
+#PACKAGES & FUNCTIONS
+library(tidyverse)
+library(stargazer)
+library(sandwich)
+library(effectsize)
+library(aod)
+source("functions.R")
+
+#SETUP
+set.seed(21200029)
+local_path <- "C:\\Users\\danie\\Documents\\Masters\\3. THESIS\\Analysis"
+surveyImport <- read.csv(paste0(local_path,"\\results.csv"), header = TRUE)
+survey <- surveyImport %>% filter(SUBMIT==1)
+
+#SURVEY 'SPLIT' (required for quick-realigning of models)
+surveyStatutory <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_STATUTORY)
+surveyProperty <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_PROPERTY)
+surveyPersons <- survey %>% rename(likert_SEVERITY=likert_SEVERITY_PERSONS)
+surveyControl <- survey %>% filter(RANDOMISER==0)
+surveyTreatment <- survey %>% filter(RANDOMISER==1)
+```
+
+```{r model-specification, include=FALSE}
+#MODEL SPECIFICATION
+independent <- c("RANDOMISER","likert_SEVERITY",
+                  "AGE", "MEDIA_SUM",
+                  "d_GENDER", "d_RACE", "d_EDUCATION", 
+                  "d_PUNISHMENT", "CRIME_FEAR"
+                 )
+formulaStatutory <- as.formula(paste("CERTAINTY_STATUTORY~", 
+                                    paste(independent, collapse = "+")))
+formulaProperty <- as.formula(paste("CERTAINTY_PROPERTY~", 
+                                    paste(independent, collapse = "+")))
+formulaPersons <- as.formula(paste("CERTAINTY_PERSONS~", 
+                                    paste(independent, collapse = "+")))
+```
+
+```{r model-ols, include=FALSE}
+olsStatutory <- lm(data=surveyStatutory,
+                   formulaStatutory)
+olsProperty <- lm(data=surveyProperty,
+                   formulaProperty)
+olsPersons <- lm(data=surveyPersons,
+                   formulaPersons)
+```
+
+```{r model-statistics, include=FALSE}
+#Cohen's D
+statutoryD <- cohens_d(surveyControl$CERTAINTY_STATUTORY,
+                       surveyTreatment$CERTAINTY_STATUTORY)
+propertyD <- cohens_d(surveyControl$CERTAINTY_PROPERTY,
+                      surveyTreatment$CERTAINTY_PROPERTY)
+personsD <- cohens_d(surveyControl$CERTAINTY_PERSONS,
+                      surveyTreatment$CERTAINTY_PERSONS)
+
+#Odds Ratio
+statutoryOR <- d_to_oddsratio(statutoryD$Cohens_d)
+propertyOR <- d_to_oddsratio(propertyD$Cohens_d)
+personsOR <- d_to_oddsratio(personsD$Cohens_d)
+
+#Restricted Model (excl. Background Questions)
+statutoryWald <- waldTest(olsStatutory, vars=2:9)
+propertyWald <- waldTest(olsProperty, vars=2:9)
+personsWald <- waldTest(olsPersons, vars=2:9)
+```
+
+```{r model-output}
+crimegazer(olsStatutory, olsProperty, olsPersons,
+           rm0(statutoryD$Cohens_d), rm0(propertyD$Cohens_d), rm0(personsD$Cohens_d),
+           statutoryWald, propertyWald, personsWald,
+           caption="Table DDD: OLS Regression Results, Key Covariates")
+```
+
+```{r anova}
+surveyStackControl <- surveyControl %>% 
+  select(c("CERTAINTY_STATUTORY", "CERTAINTY_PROPERTY", "CERTAINTY_PERSONS")) %>%
+  stack()
+surveyStackTreatment <- surveyTreatment %>% 
+  select(c("CERTAINTY_STATUTORY", "CERTAINTY_PROPERTY", "CERTAINTY_PERSONS")) %>%
+  stack()
+
+anovaControl <- aov(lm(formula=values~ind, data=surveyStackControl))
+anovaTreatment <- aov(lm(formula=values~ind, data=surveyStackTreatment))
+```
